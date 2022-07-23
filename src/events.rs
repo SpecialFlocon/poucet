@@ -2,6 +2,7 @@ use serenity::async_trait;
 use serenity::client::EventHandler;
 use serenity::model::application::interaction::{Interaction, InteractionResponseType};
 use serenity::model::gateway::Ready;
+use serenity::model::guild::Member;
 use serenity::model::id::GuildId;
 use serenity::prelude::*;
 use tracing::{debug, error, info};
@@ -31,6 +32,10 @@ impl EventHandler for Handler {
                 error!("Failed to respond to slash command: {}", e);
             }
         }
+    }
+
+    async fn guild_member_addition(&self, _ctx: Context, member: Member) {
+        debug!("New member {}#{}: {:?}", member.user.name, member.user.discriminator, member);
     }
 
     async fn ready(&self, ctx: Context, data: Ready) {
