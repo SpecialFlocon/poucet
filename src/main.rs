@@ -1,6 +1,7 @@
 mod events;
 
 use std::env;
+use std::sync::RwLock;
 
 use config::{Config, Environment, File};
 use lazy_static::lazy_static;
@@ -31,7 +32,7 @@ lazy_static! {
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let config = CONFIG.read().await.clone();
+    let config = CONFIG.read().unwrap().clone();
     let bot_token = config.get_string("discord.bot.token").expect("missing or incorrect discord bot token");
     let intents = GatewayIntents::GUILD_MEMBERS;
     let mut client = Client::builder(&bot_token, intents)

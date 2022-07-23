@@ -41,7 +41,7 @@ impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, data: Ready) {
         info!("Authenticated as {}#{}", data.user.name, data.user.discriminator);
 
-        let config = CONFIG.read().await.clone();
+        let config = CONFIG.read().unwrap().clone();
         let guild_id = config.get_string("discord.guild.id").expect("missing Discord guild ID");
         let guild_id = GuildId(guild_id
                                .parse()
