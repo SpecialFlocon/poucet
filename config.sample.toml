@@ -1,0 +1,7 @@
+# Sample configuration for poucet
+
+debug = true
+
+[discord]
+  [discord.bot]
+  token = ""
