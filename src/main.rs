@@ -1,5 +1,7 @@
-mod configuration;
+use std::env;
 
+use config::{Config, Environment, File};
+use lazy_static::lazy_static;
 use serenity::{
     async_trait,
     client::{Client, EventHandler},
@@ -8,7 +10,22 @@ use serenity::{
 };
 use tracing::{error, info};
 
-use configuration::Configuration;
+lazy_static! {
+    static ref CONFIG: RwLock<Config> = RwLock::new({
+        let run_mode = env::var("RUN_MODE").unwrap_or_else(|_| "dev".into());
+
+        let configuration = Config::builder()
+            // Load configuration file for desired run mode
+            .add_source(File::with_name(&format!("config.{}.toml", run_mode)).required(false))
+            // Load configuration from environment variables
+            .add_source(Environment::with_prefix("poucet").separator("_"))
+            // Build final configuration object
+            .build()
+            .expect("configuration error");
+
+        configuration
+    });
+}
 
 struct Handler;
 
@@ -21,11 +38,10 @@ impl EventHandler for Handler {
 
 #[tokio::main]
 async fn main() {
-    let configuration = Configuration::new().expect("configuration error");
-
     tracing_subscriber::fmt::init();
 
-    let bot_token = configuration.discord.bot.token;
+    let config = CONFIG.read().await.clone();
+    let bot_token = config.get_string("discord.bot.token").expect("missing or incorrect discord bot token");
     let intents = GatewayIntents::empty();
     let mut client = Client::builder(&bot_token, intents)
         .event_handler(Handler)
