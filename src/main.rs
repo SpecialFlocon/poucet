@@ -1,3 +1,4 @@
+mod commands;
 mod events;
 
 use std::env;
@@ -26,6 +27,11 @@ static CONFIG: Lazy<RwLock<Config>> = Lazy::new(|| {
 
         configuration
     })
+});
+static DEV: Lazy<bool> = Lazy::new(|| {
+    let run_mode = env::var("RUN_MODE").unwrap_or_else(|_| "dev".into());
+
+    run_mode == "dev"
 });
 static REDIS: Lazy<redis::Client> = Lazy::new(|| {
     let config = CONFIG.read().unwrap().clone();

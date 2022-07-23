@@ -1,5 +1,6 @@
 use serenity::async_trait;
 use serenity::client::EventHandler;
+use serenity::model::application::command::Command;
 use serenity::model::application::interaction::{Interaction, InteractionResponseType};
 use serenity::model::gateway::Ready;
 use serenity::model::guild::Member;
@@ -7,7 +8,8 @@ use serenity::model::id::GuildId;
 use serenity::prelude::*;
 use tracing::{debug, error, info};
 
-use crate::CONFIG;
+use crate::{CONFIG, DEV};
+use crate::commands::{global_slash_commands, guild_slash_commands};
 
 pub struct Handler;
 
@@ -47,13 +49,8 @@ impl EventHandler for Handler {
                                .parse()
                                .expect("Discord guild ID must be an integer"));
 
-        let result = GuildId::set_application_commands(&guild_id, &ctx.http, |commands| {
-            commands
-                .create_application_command(|command| {
-                    command.name("ping").description("Check bot responsiveness")
-                })
-        })
-        .await;
+        // Register guild slash commands
+        let result = GuildId::set_application_commands(&guild_id, &ctx.http, |commands| guild_slash_commands(commands)).await;
 
         match result {
             Ok(commands) => {
@@ -61,6 +58,24 @@ impl EventHandler for Handler {
                 debug!("Guild slash commands: {:?}", commands);
             },
             Err(e) => error!("Failed to register guild slash commands: {}", e),
+        }
+
+        // Register global slash commands
+        //
+        // When running in development mode, register commands as guild slash commands to avoid
+        // caching and for quicker access.
+        let result = if *DEV {
+            GuildId::set_application_commands(&guild_id, &ctx.http, |commands| global_slash_commands(commands)).await
+        } else {
+            Command::set_global_application_commands(&ctx.http, |commands| global_slash_commands(commands)).await
+        };
+
+        match result {
+            Ok(commands) => {
+                info!("Registered {} global slash commands", commands.len());
+                debug!("Global slash commands: {:?}", commands);
+            },
+            Err(e) => error!("Failed to register global slash commands: {}", e),
         }
     }
 }
