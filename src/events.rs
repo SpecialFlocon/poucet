@@ -9,7 +9,7 @@ use serenity::prelude::*;
 use tracing::{debug, error, info};
 
 use crate::{CONFIG, DEV};
-use crate::commands::{global_slash_commands, guild_slash_commands};
+use crate::commands::{self, global_slash_commands, guild_slash_commands};
 
 pub struct Handler;
 
@@ -20,8 +20,8 @@ impl EventHandler for Handler {
             debug!("Received command interaction: {:?}", command);
 
             let content = match command.data.name.as_str() {
-                "ping" => "Coin !".to_string(),
-                _ => "Not implemented (yet!)".to_string(),
+                "ping" => commands::ping(),
+                _ => commands::fallback(),
             };
 
             if let Err(e) = command
