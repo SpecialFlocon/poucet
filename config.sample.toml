@@ -5,3 +5,5 @@ debug = true
 [discord]
   [discord.bot]
   token = ""
+  [discord.guild]
+  id = ""
