@@ -7,3 +7,8 @@ debug = true
   token = ""
   [discord.guild]
   id = ""
+
+[redis]
+address = ""
+username = ""
+password = ""

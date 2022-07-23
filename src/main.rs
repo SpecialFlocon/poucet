@@ -4,15 +4,15 @@ use std::env;
 use std::sync::RwLock;
 
 use config::{Config, Environment, File};
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use serenity::client::Client;
 use serenity::prelude::*;
-use tracing::error;
+use tracing::{debug, error, info};
 
 use events::Handler;
 
-lazy_static! {
-    static ref CONFIG: RwLock<Config> = RwLock::new({
+static CONFIG: Lazy<RwLock<Config>> = Lazy::new(|| {
+    RwLock::new({
         let run_mode = env::var("RUN_MODE").unwrap_or_else(|_| "dev".into());
 
         let configuration = Config::builder()
@@ -25,14 +25,47 @@ lazy_static! {
             .expect("configuration error");
 
         configuration
-    });
-}
+    })
+});
+static REDIS: Lazy<redis::Client> = Lazy::new(|| {
+    let config = CONFIG.read().unwrap().clone();
+    let redis_address = config.get_string("redis.address").unwrap_or_else(|_| "127.0.0.1:6379".into());
+    let redis_username = config.get_string("redis.username").unwrap_or_default();
+    let redis_password = config.get_string("redis.password").unwrap_or_default();
+
+    let auth_info = if redis_username.is_empty() && redis_password.is_empty() {
+        String::new()
+    } else if redis_username.is_empty() {
+        redis_password
+    } else if redis_password.is_empty() {
+        redis_username
+    } else {
+        format!("{}:{}", redis_username, redis_password)
+    };
+    let url = if auth_info.is_empty() {
+        format!("redis://{}", redis_address)
+    } else {
+        format!("redis://{}@{}", auth_info, redis_address)
+    };
+
+    redis::Client::open(url).expect("redis client creation error")
+});
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
     let config = CONFIG.read().unwrap().clone();
+    debug!("Loaded configuration: {:?}", config);
+
+    // Connect to Redis
+    let mut connection = REDIS.get_connection().expect("redis connection error");
+    info!("connected to redis at {}", REDIS.get_connection_info().addr);
+    debug!("Sending Redis a PING command");
+    let output: String = redis::cmd("PING").query(&mut connection).unwrap();
+    debug!("Redis output: {}", output);
+
+    // Connect to Discord
     let bot_token = config.get_string("discord.bot.token").expect("missing or incorrect discord bot token");
     let intents = GatewayIntents::GUILD_MEMBERS;
     let mut client = Client::builder(&bot_token, intents)
