@@ -1,16 +1,14 @@
+mod events;
+
 use std::env;
 
 use config::{Config, Environment, File};
 use lazy_static::lazy_static;
-use serenity::{
-    async_trait,
-    client::{Client, EventHandler},
-    model::application::interaction::{Interaction, InteractionResponseType},
-    model::gateway::Ready,
-    model::id::GuildId,
-    prelude::*,
-};
-use tracing::{error, info};
+use serenity::client::Client;
+use serenity::prelude::*;
+use tracing::error;
+
+use events::Handler;
 
 lazy_static! {
     static ref CONFIG: RwLock<Config> = RwLock::new({
@@ -27,52 +25,6 @@ lazy_static! {
 
         configuration
     });
-}
-
-struct Handler;
-
-#[async_trait]
-impl EventHandler for Handler {
-    async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
-        if let Interaction::ApplicationCommand(command) = interaction {
-            info!("Received command interaction: {:#?}", command);
-
-            let content = match command.data.name.as_str() {
-                "ping" => "Coin !".to_string(),
-                _ => "Not implemented (yet!)".to_string(),
-            };
-
-            if let Err(e) = command
-                .create_interaction_response(&ctx.http, |response| {
-                    response
-                        .kind(InteractionResponseType::ChannelMessageWithSource)
-                        .interaction_response_data(|message| message.content(content))
-                }).await
-            {
-                error!("Failed to respond to slash command: {}", e);
-            }
-        }
-    }
-
-    async fn ready(&self, ctx: Context, data: Ready) {
-        info!("Authenticated as {}#{}", data.user.name, data.user.discriminator);
-
-        let config = CONFIG.read().await.clone();
-        let guild_id = config.get_string("discord.guild.id").expect("missing Discord guild ID");
-        let guild_id = GuildId(guild_id
-                               .parse()
-                               .expect("Discord guild ID must be an integer"));
-
-        let commands = GuildId::set_application_commands(&guild_id, &ctx.http, |commands| {
-            commands
-                .create_application_command(|command| {
-                    command.name("ping").description("Check bot responsiveness")
-                })
-        })
-        .await;
-
-        info!("Registered guild slash commands: {:#?}", commands);
-    }
 }
 
 #[tokio::main]
