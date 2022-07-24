@@ -2,13 +2,13 @@ mod commands;
 mod events;
 
 use std::env;
-use std::sync::RwLock;
+use std::sync::{Mutex, RwLock};
 
 use config::{Config, Environment, File};
 use once_cell::sync::Lazy;
 use serenity::client::Client;
 use serenity::prelude::*;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 
 use events::Handler;
 
@@ -33,7 +33,7 @@ static DEV: Lazy<bool> = Lazy::new(|| {
 
     run_mode == "dev"
 });
-static REDIS: Lazy<redis::Client> = Lazy::new(|| {
+static REDIS: Lazy<Mutex<redis::Connection>> = Lazy::new(|| {
     let config = CONFIG.read().unwrap().clone();
     let redis_address = config.get_string("redis.address").unwrap_or_else(|_| "127.0.0.1:6379".into());
     let redis_username = config.get_string("redis.username").unwrap_or_default();
@@ -54,7 +54,9 @@ static REDIS: Lazy<redis::Client> = Lazy::new(|| {
         format!("redis://{}@{}", auth_info, redis_address)
     };
 
-    redis::Client::open(url).expect("redis client creation error")
+    let client = redis::Client::open(url).expect("redis client creation error");
+
+    Mutex::new(client.get_connection().expect("redis connection error"))
 });
 
 #[tokio::main]
@@ -63,13 +65,6 @@ async fn main() {
 
     let config = CONFIG.read().unwrap().clone();
     debug!("Loaded configuration: {:?}", config);
-
-    // Connect to Redis
-    let mut connection = REDIS.get_connection().expect("redis connection error");
-    info!("connected to redis at {}", REDIS.get_connection_info().addr);
-    debug!("Sending Redis a PING command");
-    let output: String = redis::cmd("PING").query(&mut connection).unwrap();
-    debug!("Redis output: {}", output);
 
     // Connect to Discord
     let bot_token = config.get_string("discord.bot.token").expect("missing or incorrect discord bot token");
