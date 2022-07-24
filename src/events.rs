@@ -90,14 +90,7 @@ impl EventHandler for Handler {
         }
 
         // Register global slash commands
-        //
-        // When running in development mode, register commands as guild slash commands to avoid
-        // caching and for quicker access.
-        let result = if *DEV {
-            GuildId::set_application_commands(&guild_id, &ctx.http, commands::global_slash_commands).await
-        } else {
-            Command::set_global_application_commands(&ctx.http, commands::global_slash_commands).await
-        };
+        let result = Command::set_global_application_commands(&ctx.http, commands::global_slash_commands).await;
 
         match result {
             Ok(commands) => {
@@ -108,4 +101,3 @@ impl EventHandler for Handler {
         }
     }
 }
-
