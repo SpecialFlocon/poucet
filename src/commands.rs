@@ -6,6 +6,8 @@ use serenity::model::application::command::CommandOptionType;
 
 pub use ping::ping;
 
+pub const GUILD: &[&str] = &[];
+
 pub fn fallback<'a, 'b>(data: &'b mut CreateInteractionResponseData<'a>) -> &'b mut CreateInteractionResponseData<'a> {
     data.content("Not implemented (yet!)".to_string())
 }
