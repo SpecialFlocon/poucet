@@ -16,23 +16,52 @@ pub struct Handler;
 #[async_trait]
 impl EventHandler for Handler {
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
-        if let Interaction::ApplicationCommand(command) = interaction {
-            debug!("Received command interaction: {:?}", command);
+        debug!("Received interaction: {:?}", interaction);
 
-            let content = match command.data.name.as_str() {
-                "ping" => commands::ping(),
-                _ => commands::fallback(),
-            };
+        match interaction {
+            // Slash command
+            Interaction::ApplicationCommand(interaction) => {
+                let command_result = match interaction.data.name.as_str() {
+                    "ping" => commands::ping,
+                    "setup" => commands::setup::home,
+                    _ => commands::fallback,
+                };
 
-            if let Err(e) = command
-                .create_interaction_response(&ctx.http, |response| {
-                    response
-                        .kind(InteractionResponseType::ChannelMessageWithSource)
-                        .interaction_response_data(|message| message.content(content))
-                }).await
-            {
-                error!("Failed to respond to slash command: {}", e);
-            }
+                if let Err(e) = interaction
+                    .create_interaction_response(&ctx.http, |response| {
+                        response
+                            .kind(InteractionResponseType::ChannelMessageWithSource)
+                            .interaction_response_data(command_result)
+                    }).await
+                {
+                    error!("Failed to respond to slash command: {}", e);
+                }
+            },
+            // Component interaction (button click, etc.)
+            Interaction::MessageComponent(interaction) => {
+                let followup_action = match interaction.data.custom_id.as_str() {
+                    "setup_onboarding" => commands::setup::onboarding,
+                    "setup_go_back" => commands::setup::home,
+                    "setup_done" => commands::setup::done,
+                    _ => {
+                        if let Err(e) = interaction.delete_original_interaction_response(&ctx.http).await {
+                            error!("Failed to delete original interaction response: {}", e);
+                        };
+                        return;
+                    },
+                };
+
+                if let Err(e) = interaction
+                    .create_interaction_response(&ctx.http, |response| {
+                        response
+                            .kind(InteractionResponseType::UpdateMessage)
+                            .interaction_response_data(followup_action)
+                    }).await
+                {
+                    error!("Failed to respond to component interaction: {}", e)
+                }
+            },
+            _ => (),
         }
     }
 
