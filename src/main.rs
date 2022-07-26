@@ -81,6 +81,7 @@ async fn main() {
         .options(FrameworkOptions {
             commands: vec![
                 commands::ping(),
+                commands::setup(),
             ],
             listener: |ctx, event, framework, user_data| {
                 Box::pin(events::listener(ctx, event, framework, user_data))

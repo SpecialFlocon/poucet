@@ -1,4 +1,5 @@
 use redis::Commands;
+use serenity::model::channel::Channel;
 
 use crate::{Context, Error};
 
@@ -15,6 +16,36 @@ pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
         }).await?;
     } else {
         ctx.say("Coin !").await?;
+    }
+
+    Ok(())
+}
+
+/// Configure Poucet to serve a guild
+#[poise::command(slash_command)]
+pub async fn setup(
+    ctx: Context<'_>,
+    #[description = "Channel in which to create threads to welcome new members"] welcome_channel: Channel,
+    #[description = "Run setup for an already configured guild"] anew: Option<bool>,
+) -> Result<(), Error> {
+    let bot = ctx.data();
+    let guild_id = ctx.guild_id().unwrap();
+    let serves_guild = bot.serves_guild(&guild_id).await?;
+
+    if serves_guild && !anew.unwrap_or_default() {
+        poise::send_reply(ctx, |builder| {
+            builder
+                .content("I'm already configured to serve this guild! Run this command again with the `anew` parameter set to `true` to reconfigure me.")
+                .ephemeral(true)
+        }).await?;
+    } else {
+        let guild_key = format!("guild:{}", &guild_id);
+        let mut database = bot.database.lock().await;
+
+        database.hset(&guild_key, "configured", true)?;
+        database.hset(&guild_key, "welcome_channel", &welcome_channel.id().as_u64())?;
+
+        ctx.say("🙌 All set! Poucet is now ready to use 🤖✨").await?;
     }
 
     Ok(())
