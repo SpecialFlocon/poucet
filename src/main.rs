@@ -11,19 +11,22 @@ use redis::{Commands, RedisResult};
 use serenity::model::application::command::Command;
 use serenity::model::gateway::GatewayIntents;
 use serenity::model::id::GuildId;
+use serenity::prelude::Mutex;
 use tracing::{debug, error, info};
 
 type Error = Box<dyn error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Bot, Error>;
 
 pub struct Bot {
-    database: redis::Connection,
+    database: Mutex<redis::Connection>,
     run_mode: String,
 }
 
 impl Bot {
-    fn serves_guild(&mut self, guild_id: &GuildId) -> RedisResult<bool> {
-        self.database.hget(format!("guild:{}", guild_id), "configured")
+    async fn serves_guild(&self, guild_id: &GuildId) -> RedisResult<bool> {
+        let mut database = self.database.lock().await;
+
+        database.hget(format!("guild:{}", guild_id), "configured")
     }
 }
 
@@ -66,7 +69,7 @@ async fn main() {
     };
 
     let client = redis::Client::open(url).expect("redis client creation error");
-    let database = client.get_connection().expect("connecting to redis failed");
+    let database = Mutex::new(client.get_connection().expect("connecting to redis failed"));
 
     // Create bot instance to be passed as context to command functions
     let bot = Bot { database, run_mode };

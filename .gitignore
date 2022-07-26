@@ -4,3 +4,7 @@
 # Configuration files
 /config.dev.toml
 /config.prod.toml
+
+# IDE files
+.idea
+*.iml
