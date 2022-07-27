@@ -5,7 +5,8 @@ use std::env;
 use std::error;
 
 use config::{Config, Environment, File};
-use poise::{Framework, FrameworkOptions};
+use derivative::Derivative;
+use poise::{Framework, FrameworkError, FrameworkOptions};
 use poise::builtins;
 use redis::{Commands, RedisResult};
 use serenity::model::application::command::Command;
@@ -17,16 +18,38 @@ use tracing::{debug, error, info};
 type Error = Box<dyn error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Bot, Error>;
 
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct Bot {
+    #[derivative(Debug="ignore")]
     database: Mutex<redis::Connection>,
     run_mode: String,
 }
 
 impl Bot {
-    async fn serves_guild(&self, guild_id: &GuildId) -> RedisResult<bool> {
+    async fn serves_guild(&self, guild_id: GuildId) -> RedisResult<bool> {
         let mut database = self.database.lock().await;
 
         database.hget(format!("guild:{}", guild_id), "configured")
+    }
+}
+
+async fn error_handler(error: FrameworkError<'_, Bot, Error>) {
+    match error {
+        FrameworkError::Setup { error } => error!("error setting up bot framework: {:?}", error),
+        FrameworkError::Listener { error, ctx: _, event, framework: _ } => error!("error while handling event {}: {:?}", event.name(), error),
+        FrameworkError::Command { error, ctx} => error!("error while running command {}: {:?}", ctx.command().name, error),
+        FrameworkError::ArgumentParse { error, input, ctx} => {
+            let incorrect_input = input.unwrap_or_default();
+
+            error!("error while parsing argument: {:?}, incorrect input: {}", error, incorrect_input);
+            poise::send_reply(ctx, |reply| {
+                reply
+                    .content(format!("Sorry, I didn't understand your command! Can you double-check your input?\nFor the record, here's the part I didn't understand (if any): {}", incorrect_input))
+                    .ephemeral(true)
+            }).await.ok();
+        },
+        _ => error!("discord API error: {:?}", error),
     }
 }
 
@@ -86,6 +109,7 @@ async fn main() {
             listener: |ctx, event, framework, user_data| {
                 Box::pin(events::listener(ctx, event, framework, user_data))
             },
+            on_error: |error| Box::pin(error_handler(error)),
             ..Default::default()
         })
         .token(&bot_token)

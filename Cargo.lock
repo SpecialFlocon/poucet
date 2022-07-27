@@ -910,7 +910,7 @@ name = "poucet"
 version = "0.1.0"
 dependencies = [
  "config",
- "once_cell",
+ "derivative",
  "poise",
  "redis",
  "serde",
