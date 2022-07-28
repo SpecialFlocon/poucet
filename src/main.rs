@@ -99,7 +99,7 @@ async fn main() {
 
     // Connect to Discord and run bot framework
     let bot_token = configuration.get_string("discord.bot.token").expect("missing or incorrect discord bot token");
-    let intents = GatewayIntents::GUILD_MEMBERS;
+    let intents = GatewayIntents::GUILDS | GatewayIntents::GUILD_MEMBERS;
     let framework = Framework::build()
         .options(FrameworkOptions {
             commands: vec![
