@@ -5,8 +5,8 @@ use serenity::model::application::component::ButtonStyle;
 use serenity::model::application::interaction::{Interaction, InteractionResponseType};
 use serenity::model::channel::{ChannelType, PermissionOverwrite, PermissionOverwriteType};
 use serenity::model::gateway::Ready;
-use serenity::model::guild::{Guild, Member};
-use serenity::model::id::ChannelId;
+use serenity::model::guild::{Guild, Member, Role};
+use serenity::model::id::{ChannelId, RoleId};
 use serenity::model::permissions::Permissions;
 use serenity::prelude::SerenityError;
 use serenity::utils::Colour;
@@ -25,9 +25,16 @@ async fn setup_member_verification(ctx: &serenity::client::Context, bot: &Bot, m
     }
 
     let guild_key = format!("guild:{}", guild_id);
+    let onboarding_key = format!("onboarding:{}", guild_id);
     let mut database = bot.database.lock().await;
     let verification_category = database.hget(&guild_key, "verification_category")?;
     let verification_category = ChannelId(verification_category);
+
+    let roles = guild_id.roles(&ctx.http).await?;
+    let notify_role = database.hget(&onboarding_key, "notify_role")?;
+    let notify_role = roles.get(&RoleId(notify_role)).ok_or_else(|| {
+        Error::from(format!("role {} is configured as the notify role for onboarding, but it doesn't exist in the guild", notify_role))
+    })?;
 
     let member_channel = guild_id.create_channel(&ctx.http, |channel| {
         channel
@@ -41,7 +48,7 @@ async fn setup_member_verification(ctx: &serenity::client::Context, bot: &Bot, m
             }])
     }).await?;
 
-    member_channel.send_message(&ctx.http, |message| new_member_wait_notice(member, message)).await?;
+    member_channel.send_message(&ctx.http, |message| new_member_wait_notice(member, notify_role, message)).await?;
 
     Ok(())
 }
@@ -73,9 +80,9 @@ To keep our space safe and gezellig, we have a simple verification process for n
         })
 }
 
-fn new_member_wait_notice<'a, 'b>(member: &Member, message: &'b mut CreateMessage<'a>) -> &'b mut CreateMessage<'a> {
+fn new_member_wait_notice<'a, 'b>(member: &Member, notify_role: &Role, message: &'b mut CreateMessage<'a>) -> &'b mut CreateMessage<'a> {
     message
-        .content(format!("{}", member))
+        .content(format!("{} {}", member, notify_role))
         .embed(|embed| {
             embed
                 .colour(Colour::BLITZ_BLUE)
