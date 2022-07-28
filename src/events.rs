@@ -6,8 +6,9 @@ use serenity::model::application::interaction::{Interaction, InteractionResponse
 use serenity::model::channel::{ChannelType, PermissionOverwrite, PermissionOverwriteType};
 use serenity::model::gateway::Ready;
 use serenity::model::guild::{Guild, Member, Role};
-use serenity::model::id::{ChannelId, RoleId};
+use serenity::model::id::{ChannelId, GuildId, RoleId, UserId};
 use serenity::model::permissions::Permissions;
+use serenity::model::user::User;
 use serenity::prelude::SerenityError;
 use serenity::utils::Colour;
 use tokio::sync::MutexGuard;
@@ -17,15 +18,142 @@ use crate::{Bot, Error};
 
 const ONBOARDING_START: &str = "onboarding_start";
 
-async fn pending_validation<'a>(database: &mut MutexGuard<'a, Connection>, member: &Member) -> Result<Option<ChannelId>, Error> {
-    let member_id = member.user.id.as_u64();
-    let pending_validations_key = format!("pending_validations:{}", member.guild_id);
+// Event dispatcher
+pub async fn listener(ctx: &serenity::client::Context, event: &poise::Event<'_>, _framework: poise::FrameworkContext<'_, Bot, Error>, bot: &Bot) -> Result<(), Error> {
+    match event {
+        poise::Event::Ready { data_about_bot } => ready(data_about_bot),
+        poise::Event::GuildCreate { guild, is_new } => guild_create(ctx, bot, guild, is_new).await?,
+        poise::Event::GuildMemberRemoval { guild_id, user, member_data_if_available: _ } => guild_member_removal(ctx, bot, guild_id, user).await?,
+        poise::Event::InteractionCreate { interaction } => interaction_create(ctx, bot, interaction).await?,
+        _ => {},
+    }
 
-    if !database.hexists(&pending_validations_key, member_id)? {
+    Ok(())
+}
+
+// Event handlers
+fn ready(data: &Ready) {
+    info!("Authenticated as {}#{}", data.user.name, data.user.discriminator);
+}
+
+async fn guild_create(ctx: &serenity::client::Context, bot: &Bot, guild: &Guild, is_new: &bool) -> Result<(), Error> {
+    debug!("guild_create event fired for {}", guild.id);
+
+    if *is_new {
+        return Ok(());
+    }
+
+    let serves_guild = bot.serves_guild(guild.id).await?;
+
+    if !serves_guild {
+        return Ok(());
+    }
+
+    let guild_key = format!("guild:{}", guild.id);
+    let mut database = bot.database.lock().await;
+    let welcome_channel = database.hget(&guild_key, "welcome_channel")?;
+    let welcome_channel = ChannelId(welcome_channel);
+
+    if database.hexists(&guild_key, "welcome_message")? {
+        let welcome_message: u64 = database.hget(&guild_key, "welcome_message")?;
+        let welcome_message = welcome_channel.message(&ctx.http, welcome_message).await;
+
+        if welcome_message.is_ok() {
+            return Ok(());
+        }
+
+        let error = welcome_message.err().unwrap();
+
+        if let SerenityError::Http(error) = error {
+            if let Some(status_code) = error.status_code() {
+                if status_code == StatusCode::NOT_FOUND {
+                    let new_welcome_message = welcome_channel.send_message(&ctx.http, welcome_instructions).await?;
+
+                    database.hset(&guild_key, "welcome_message", new_welcome_message.id.as_u64())?;
+
+                    return Ok(());
+                }
+            }
+
+            error!("{}", error);
+        }
+    } else {
+        let new_welcome_message = welcome_channel.send_message(&ctx.http, welcome_instructions).await?;
+
+        database.hset(&guild_key, "welcome_message", new_welcome_message.id.as_u64())?;
+    }
+
+    Ok(())
+}
+
+async fn guild_member_removal(ctx: &serenity::client::Context, bot: &Bot, guild_id: &GuildId, user: &User) -> Result<(), Error> {
+    debug!("Member {} left the server, removing database entries related to this member and informing staff", &user.id);
+
+    let mut database = bot.database.lock().await;
+    let pending_validations_key = format!("pending_validations:{}", guild_id);
+    let validation_channel = pending_validation(&mut database, guild_id, &user.id).await?;
+
+    if let Some(validation_channel) = validation_channel {
+        database.hdel(&pending_validations_key, &user.id.as_u64())?;
+
+        validation_channel.send_message(&ctx.http, |message| {
+            message
+                .embed(|embed| {
+                    embed
+                        .colour(Colour::DARK_RED)
+                        .title("Status update")
+                        .description(format!("User {} has left the server", user))
+                })
+        }).await?;
+    }
+
+    Ok(())
+}
+
+async fn interaction_create(ctx: &serenity::client::Context, bot: &Bot, interaction: &Interaction) -> Result<(), Error> {
+    if let Interaction::MessageComponent(interaction) = interaction {
+        let guild_id = interaction.guild_id.unwrap();
+        let serves_guild = bot.serves_guild(guild_id).await?;
+
+        if !serves_guild {
+            return Ok(());
+        }
+
+        if interaction.data.custom_id == ONBOARDING_START {
+            let mut database = bot.database.lock().await;
+
+            interaction.create_interaction_response(&ctx.http, |response| {
+                response
+                    .kind(InteractionResponseType::DeferredChannelMessageWithSource)
+                    .interaction_response_data(|data| data.ephemeral(true))
+            }).await?;
+
+            let member = interaction.member.as_ref().unwrap();
+            let validation_channel = pending_validation(&mut database, &guild_id, &member.user.id).await?;
+
+            if validation_channel.is_none() {
+                setup_member_verification(ctx, &mut database, member).await?;
+            }
+
+            interaction.create_followup_message(&ctx.http, |message| {
+                reply_to_join_request(validation_channel, message)
+            }).await?;
+        }
+    }
+
+    Ok(())
+}
+
+// Utility functions
+async fn pending_validation<'a>(database: &mut MutexGuard<'a, Connection>, guild_id: &GuildId, user_id: &UserId) -> Result<Option<ChannelId>, Error> {
+    let user_id = user_id.as_u64();
+    let pending_validations_key = format!("pending_validations:{}", guild_id);
+
+    if !database.hexists(&pending_validations_key, user_id)? {
         return Ok(None);
     }
 
-    Ok(Some(ChannelId(database.hget(&pending_validations_key, member_id)?)))
+    Ok(Some(ChannelId(database.hget(&pending_validations_key, user_id)?)))
 }
 
 async fn setup_member_verification<'a>(ctx: &serenity::client::Context, database: &mut MutexGuard<'a, Connection>, member: &Member) -> Result<(), Error> {
@@ -115,105 +243,4 @@ Hold on, a staff member will be with you soon to help you get started.
 To speed up the validation process, can you already tell us a few words about you, how or where you found out about this server, what brings you here, etc.? Thank you! 😁"
                 )
         })
-}
-
-// Event dispatcher
-pub async fn listener(ctx: &serenity::client::Context, event: &poise::Event<'_>, _framework: poise::FrameworkContext<'_, Bot, Error>, bot: &Bot) -> Result<(), Error> {
-    match event {
-        poise::Event::Ready { data_about_bot } => ready(data_about_bot),
-        poise::Event::GuildCreate { guild, is_new } => guild_create(ctx, bot, guild, is_new).await?,
-        poise::Event::InteractionCreate { interaction } => interaction_create(ctx, bot, interaction).await?,
-        _ => {},
-    }
-
-    Ok(())
-}
-
-// Event handlers
-fn ready(data: &Ready) {
-    info!("Authenticated as {}#{}", data.user.name, data.user.discriminator);
-}
-
-async fn guild_create(ctx: &serenity::client::Context, bot: &Bot, guild: &Guild, is_new: &bool) -> Result<(), Error> {
-    debug!("guild_create event fired for {}", guild.id);
-
-    if *is_new {
-        return Ok(());
-    }
-
-    let serves_guild = bot.serves_guild(guild.id).await?;
-
-    if !serves_guild {
-        return Ok(());
-    }
-
-    let guild_key = format!("guild:{}", guild.id);
-    let mut database = bot.database.lock().await;
-    let welcome_channel = database.hget(&guild_key, "welcome_channel")?;
-    let welcome_channel = ChannelId(welcome_channel);
-
-    if database.hexists(&guild_key, "welcome_message")? {
-        let welcome_message: u64 = database.hget(&guild_key, "welcome_message")?;
-        let welcome_message = welcome_channel.message(&ctx.http, welcome_message).await;
-
-        if welcome_message.is_ok() {
-            return Ok(());
-        }
-
-        let error = welcome_message.err().unwrap();
-
-        if let SerenityError::Http(error) = error {
-            if let Some(status_code) = error.status_code() {
-                if status_code == StatusCode::NOT_FOUND {
-                    let new_welcome_message = welcome_channel.send_message(&ctx.http, welcome_instructions).await?;
-
-                    database.hset(&guild_key, "welcome_message", new_welcome_message.id.as_u64())?;
-
-                    return Ok(());
-                }
-            }
-
-            error!("{}", error);
-        }
-    } else {
-        let new_welcome_message = welcome_channel.send_message(&ctx.http, welcome_instructions).await?;
-
-        database.hset(&guild_key, "welcome_message", new_welcome_message.id.as_u64())?;
-    }
-
-    Ok(())
-}
-
-async fn interaction_create(ctx: &serenity::client::Context, bot: &Bot, interaction: &Interaction) -> Result<(), Error> {
-    if let Interaction::MessageComponent(interaction) = interaction {
-        let guild_id = interaction.guild_id.unwrap();
-        let serves_guild = bot.serves_guild(guild_id).await?;
-
-        if !serves_guild {
-            return Ok(());
-        }
-
-        if interaction.data.custom_id == ONBOARDING_START {
-            let mut database = bot.database.lock().await;
-
-            interaction.create_interaction_response(&ctx.http, |response| {
-                response
-                    .kind(InteractionResponseType::DeferredChannelMessageWithSource)
-                    .interaction_response_data(|data| data.ephemeral(true))
-            }).await?;
-
-            let member = interaction.member.as_ref().unwrap();
-            let validation_channel = pending_validation(&mut database, member).await?;
-
-            if validation_channel.is_none() {
-                setup_member_verification(ctx, &mut database, member).await?;
-            }
-
-            interaction.create_followup_message(&ctx.http, |message| {
-                reply_to_join_request(validation_channel, message)
-            }).await?;
-        }
-    }
-
-    Ok(())
 }
