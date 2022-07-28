@@ -106,6 +106,7 @@ async fn main() {
             commands: vec![
                 commands::ping(),
                 commands::setup(),
+                commands::onboarding(),
             ],
             listener: |ctx, event, framework, user_data| {
                 Box::pin(events::listener(ctx, event, framework, user_data))
