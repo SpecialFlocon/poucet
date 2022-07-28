@@ -1,5 +1,6 @@
 mod commands;
 mod events;
+mod models;
 
 use std::env;
 use std::error;

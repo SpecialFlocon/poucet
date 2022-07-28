@@ -1,8 +1,9 @@
 use redis::Commands;
 use serenity::model::channel::Channel;
-use tracing::{debug, error};
+use tracing::error;
 
 use crate::{Context, Error};
+use crate::models::GuildConfiguration;
 
 /// Am I responding? Use this command to find out!
 #[poise::command(slash_command)]
@@ -44,12 +45,16 @@ pub async fn setup(
         return Ok(());
     }
 
-    if matches!(verification_category, Channel::Guild(_) | Channel::Private(_)) || matches!(welcome_channel, Channel::Private(_) | Channel::Category(_)) {
-        error!("Setup in guild {} was called with incorrect channel types", &guild_id);
-        debug!("given values are: verification category {}, welcome channel {}", verification_category.id(), welcome_channel.id());
+    let guild_configuration = GuildConfiguration::new(verification_category, welcome_channel).unwrap_or_else(|error| {
+        error!("incorrect server configuration values: {}", error);
+
+        GuildConfiguration::default()
+    });
+
+    if !guild_configuration.configured {
         poise::send_reply(ctx, |reply| {
             reply
-                .content("The channels you gave me are of incorrect type! Welcome channel needs to be a guild channel, verification channel needs to be a category.")
+                .content("Got incorrect configuration, please make sure the values you pass are of the right type!")
                 .ephemeral(true)
         }).await?;
 
@@ -59,9 +64,9 @@ pub async fn setup(
     let guild_key = format!("guild:{}", guild_id);
     let mut database = bot.database.lock().await;
 
-    database.hset(&guild_key, "configured", true)?;
-    database.hset(&guild_key, "verification_category", &verification_category.id().as_u64())?;
-    database.hset(&guild_key, "welcome_channel", &welcome_channel.id().as_u64())?;
+    database.hset(&guild_key, "configured", guild_configuration.configured)?;
+    database.hset(&guild_key, "verification_category", guild_configuration.verification_category.unwrap().id.as_u64())?;
+    database.hset(&guild_key, "welcome_channel", guild_configuration.welcome_channel.unwrap().id.as_u64())?;
 
     ctx.say("🙌 All set! Poucet is now ready to use 🤖✨").await?;
 
