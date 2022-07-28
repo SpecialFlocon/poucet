@@ -82,9 +82,9 @@ fn new_member_wait_notice<'a, 'b>(member: &Member, message: &'b mut CreateMessag
                 .description(
                     "**Hey there! 👋**
 
-Hold on, a staff member will be with you shortly to help you get started.
+Hold on, a staff member will be with you soon to help you get started.
 
-To speed up the validation process, feel free to already tell us a few words about you, how or where did you find out about this server, what brings you here, etc. Thank you! 😁"
+To speed up the validation process, can you already tell us a few words about you, how or where you found out about this server, what brings you here, etc.? Thank you! 😁"
                 )
         })
 }
