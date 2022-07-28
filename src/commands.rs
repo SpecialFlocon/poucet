@@ -1,5 +1,6 @@
 use redis::Commands;
 use serenity::model::channel::Channel;
+use serenity::model::guild::Role;
 use tracing::error;
 
 use crate::{Context, Error};
@@ -27,6 +28,7 @@ pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(slash_command)]
 pub async fn setup(
     ctx: Context<'_>,
+    #[description = "The role that is allowed to run restricted commands"] admin_role: Role,
     #[description = "Category in which to create private channels for member verification"] verification_category: Channel,
     #[description = "Channel in which to post a welcome message for new members"] welcome_channel: Channel,
     #[description = "Run setup for an already configured guild"] anew: Option<bool>,
@@ -45,7 +47,7 @@ pub async fn setup(
         return Ok(());
     }
 
-    let guild_configuration = GuildConfiguration::new(verification_category, welcome_channel).unwrap_or_else(|error| {
+    let guild_configuration = GuildConfiguration::new(admin_role, verification_category, welcome_channel).unwrap_or_else(|error| {
         error!("incorrect server configuration values: {}", error);
 
         GuildConfiguration::default()
@@ -65,6 +67,7 @@ pub async fn setup(
     let mut database = bot.database.lock().await;
 
     database.hset(&guild_key, "configured", guild_configuration.configured)?;
+    database.hset(&guild_key, "admin_role", guild_configuration.admin_role.unwrap().id.as_u64())?;
     database.hset(&guild_key, "verification_category", guild_configuration.verification_category.unwrap().id.as_u64())?;
     database.hset(&guild_key, "welcome_channel", guild_configuration.welcome_channel.unwrap().id.as_u64())?;
 
