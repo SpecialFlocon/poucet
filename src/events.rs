@@ -22,18 +22,18 @@ const ONBOARDING_START: &str = "onboarding_start";
 pub async fn listener(ctx: &serenity::client::Context, event: &poise::Event<'_>, _framework: poise::FrameworkContext<'_, Bot, Error>, bot: &Bot) -> Result<(), Error> {
     match event {
         poise::Event::Ready { data_about_bot } => ready(data_about_bot),
-        poise::Event::GuildCreate { guild, is_new } => guild_create(ctx, bot, guild, is_new).await?,
-        poise::Event::GuildMemberRemoval { guild_id, user, member_data_if_available: _ } => guild_member_removal(ctx, bot, guild_id, user).await?,
-        poise::Event::InteractionCreate { interaction } => interaction_create(ctx, bot, interaction).await?,
-        _ => {},
+        poise::Event::GuildCreate { guild, is_new } => guild_create(ctx, bot, guild, is_new).await,
+        poise::Event::GuildMemberRemoval { guild_id, user, member_data_if_available: _ } => guild_member_removal(ctx, bot, guild_id, user).await,
+        poise::Event::InteractionCreate { interaction } => interaction_create(ctx, bot, interaction).await,
+        _ => Ok(()),
     }
-
-    Ok(())
 }
 
 // Event handlers
-fn ready(data: &Ready) {
+fn ready(data: &Ready) -> Result<(), Error> {
     info!("Authenticated as {}#{}", data.user.name, data.user.discriminator);
+
+    Ok(())
 }
 
 async fn guild_create(ctx: &serenity::client::Context, bot: &Bot, guild: &Guild, is_new: &bool) -> Result<(), Error> {
