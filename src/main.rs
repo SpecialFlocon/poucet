@@ -79,17 +79,21 @@ async fn main() {
     let redis_password = configuration.get_string("redis.password").unwrap_or_default();
 
     let auth_info = if redis_username.is_empty() && redis_password.is_empty() {
-        String::new()
+        vec![]
+    } else if redis_username.is_empty() {
+        vec![redis_password]
     } else {
-        format!("{}:{}", redis_username, redis_password)
-    };
-    let url = if auth_info.is_empty() {
-        format!("redis://{}", redis_address)
-    } else {
-        format!("redis://{}@{}", auth_info, redis_address)
+        vec![redis_username, redis_password]
     };
 
-    let client = redis::Client::open(url).expect("redis client creation error");
+    let client = redis::Client::open(format!("redis://{}", redis_address)).expect("redis client creation error");
+    let mut database = client.get_connection().expect("connecting to redis failed");
+
+    // Authenticate to Redis with provided credentials, if applicable
+    if !auth_info.is_empty() {
+        redis::cmd("AUTH").arg(&auth_info).execute(&mut database);
+    }
+
     let database = Mutex::new(client.get_connection().expect("connecting to redis failed"));
 
     // Create bot instance to be passed as context to command functions
