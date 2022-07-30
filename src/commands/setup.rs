@@ -11,7 +11,10 @@ use crate::models::GuildConfiguration;
 pub async fn setup(
     ctx: Context<'_>,
     #[description = "The role that is allowed to run restricted commands"] admin_role: Role,
-    #[description = "Category in which to create private channels for member verification"] verification_category: Channel,
+    #[description = "The role to grant upon validation of a member"] validated_role: Role,
+    #[description = "Channel in which members can introduce themselves"] introductions_channel: Channel,
+    #[description = "Channel in which members can assign themselves roles"] role_assignment_channel: Channel,
+    #[description = "Category in which to create private channels for member validation"] validation_category: Channel,
     #[description = "Channel in which to post a welcome message for new members"] welcome_channel: Channel,
     #[description = "Run setup for an already configured guild"] anew: Option<bool>,
 ) -> Result<(), Error> {
@@ -29,10 +32,11 @@ pub async fn setup(
         return Ok(());
     }
 
-    let guild_configuration = GuildConfiguration::new(admin_role, verification_category, welcome_channel).unwrap_or_else(|error| {
-        error!("incorrect server configuration values: {}", error);
+    let guild_configuration = GuildConfiguration::new(admin_role, validated_role, introductions_channel, role_assignment_channel, validation_category, welcome_channel)
+        .unwrap_or_else(|error| {
+            error!("incorrect server configuration values: {}", error);
 
-        GuildConfiguration::default()
+            GuildConfiguration::default()
     });
 
     if !guild_configuration.configured {
@@ -50,7 +54,10 @@ pub async fn setup(
 
     database.hset(&guild_key, "configured", guild_configuration.configured)?;
     database.hset(&guild_key, "admin_role", guild_configuration.admin_role.unwrap().id.as_u64())?;
-    database.hset(&guild_key, "verification_category", guild_configuration.verification_category.unwrap().id.as_u64())?;
+    database.hset(&guild_key, "validated_role", guild_configuration.validated_role.unwrap().id.as_u64())?;
+    database.hset(&guild_key, "introductions_channel", guild_configuration.introductions_channel.unwrap().id.as_u64())?;
+    database.hset(&guild_key, "role_assignment_channel", guild_configuration.role_assignment_channel.unwrap().id.as_u64())?;
+    database.hset(&guild_key, "validation_category", guild_configuration.validation_category.unwrap().id.as_u64())?;
     database.hset(&guild_key, "welcome_channel", guild_configuration.welcome_channel.unwrap().id.as_u64())?;
 
     ctx.say("🙌 All set! Poucet is now ready to use 🤖✨").await?;

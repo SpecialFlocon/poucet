@@ -10,16 +10,13 @@ use serenity::model::guild::{Guild, Member, Role};
 use serenity::model::id::{ChannelId, GuildId, RoleId, UserId};
 use serenity::model::permissions::Permissions;
 use serenity::model::user::User;
-use serenity::prelude::SerenityError;
+use serenity::prelude::{Mentionable, SerenityError};
 use serenity::utils::Colour;
 use tokio::sync::MutexGuard;
 use tracing::{debug, error, info};
 
 use crate::{Bot, Error};
-
-const ONBOARDING_ARCHIVE: &str = "onboarding_archive";
-const ONBOARDING_DELETE: &str = "onboarding_delete";
-const ONBOARDING_START: &str = "onboarding_start";
+use crate::identifiers;
 
 // Event dispatcher
 pub async fn listener(ctx: &serenity::client::Context, event: &poise::Event<'_>, _framework: poise::FrameworkContext<'_, Bot, Error>, bot: &Bot) -> Result<(), Error> {
@@ -105,9 +102,9 @@ async fn interaction_create(ctx: &serenity::client::Context, bot: &Bot, interact
         }
 
         match interaction.data.custom_id.as_str() {
-            ONBOARDING_ARCHIVE => onboarding_archive(ctx, bot, interaction).await?,
-            ONBOARDING_DELETE => onboarding_delete(ctx, bot, interaction).await?,
-            ONBOARDING_START => onboarding_start(ctx, bot, interaction).await?,
+            identifiers::ONBOARDING_ARCHIVE => onboarding_archive(ctx, bot, interaction).await?,
+            identifiers::ONBOARDING_DELETE => onboarding_delete(ctx, bot, interaction).await?,
+            identifiers::ONBOARDING_START => onboarding_start(ctx, bot, interaction).await?,
             _ => (),
         }
     }
@@ -204,13 +201,13 @@ async fn onboarding_member_removal(ctx: &serenity::client::Context, bot: &Bot, g
                         row
                             .create_button(|button| {
                                 button
-                                    .custom_id(ONBOARDING_ARCHIVE)
+                                    .custom_id(identifiers::ONBOARDING_ARCHIVE)
                                     .style(ButtonStyle::Secondary)
                                     .label("Archive")
                             })
                             .create_button(|button| {
                                 button
-                                    .custom_id(ONBOARDING_DELETE)
+                                    .custom_id(identifiers::ONBOARDING_DELETE)
                                     .style(ButtonStyle::Danger)
                                     .label("Delete")
                             })
@@ -270,19 +267,20 @@ async fn setup_member_verification<'a>(ctx: &serenity::client::Context, database
     let notify_role = roles.get(&RoleId(notify_role)).ok_or_else(|| {
         Error::from(format!("role {} is configured as the notify role for onboarding, but it doesn't exist in the guild", notify_role))
     })?;
-    let verification_category = database.hget(&guild_key, "verification_category")?;
-    let verification_category = ChannelId(verification_category);
+    let validation_category = database.hget(&guild_key, "validation_category")?;
+    let validation_category = ChannelId(validation_category);
 
     let member_channel = guild_id.create_channel(&ctx.http, |channel| {
         channel
             .kind(ChannelType::Text)
             .name(member.user.tag().replace('#', "-"))
-            .category(verification_category)
-            .permissions(vec![PermissionOverwrite {
-                allow: Permissions::VIEW_CHANNEL | Permissions::READ_MESSAGE_HISTORY | Permissions::SEND_MESSAGES,
-                deny: Permissions::empty(),
-                kind: PermissionOverwriteType::Member(member.user.id),
-            }])
+            .category(validation_category)
+    }).await?;
+
+    member_channel.create_permission(&ctx.http, &PermissionOverwrite {
+        allow: Permissions::VIEW_CHANNEL | Permissions::READ_MESSAGE_HISTORY | Permissions::SEND_MESSAGES,
+        deny: Permissions::empty(),
+        kind: PermissionOverwriteType::Member(member.user.id),
     }).await?;
 
     database.hset(&validation_key, "channel", member_channel.id.as_u64())?;
@@ -298,7 +296,7 @@ fn reply_to_join_request<'a, 'b>(pending_validation_channel: Option<ChannelId>, 
     match pending_validation_channel {
         Some(channel) => {
             followup_message
-                .content(format!("You already asked to join the server! Your request is being discussed in <#{}>.", channel))
+                .content(format!("You already asked to join the server! Your request is being discussed in {}.", channel.mention()))
         },
         None => {
             followup_message
@@ -325,7 +323,7 @@ To keep our space safe and gezellig, we have a simple verification process for n
             components.create_action_row(|row| {
                 row.create_button(|button| {
                     button
-                        .custom_id(ONBOARDING_START)
+                        .custom_id(identifiers::ONBOARDING_START)
                         .style(ButtonStyle::Primary)
                         .emoji('🚪')
                         .label("Enter")
