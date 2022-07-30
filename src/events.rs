@@ -116,7 +116,7 @@ async fn interaction_create(ctx: &serenity::client::Context, bot: &Bot, interact
 async fn onboarding_archive(ctx: &serenity::client::Context, bot: &Bot, interaction: &MessageComponentInteraction) -> Result<(), Error> {
     interaction.create_interaction_response(&ctx.http, |response| {
         response
-            .kind(InteractionResponseType::DeferredChannelMessageWithSource)
+            .kind(InteractionResponseType::DeferredUpdateMessage)
             .interaction_response_data(|data| data)
     }).await?;
 
@@ -150,8 +150,25 @@ async fn onboarding_archive(ctx: &serenity::client::Context, bot: &Bot, interact
 
         info!("archived validation channel {} in guild {}", validation_channel, guild_id);
 
-        interaction.create_followup_message(&ctx.http, |message| {
-            message.content("Channel has been archived.")
+        interaction.edit_original_interaction_response(&ctx.http, |response| {
+            response.components(|components| {
+                components.create_action_row(|row| {
+                    row
+                        .create_button(|button| {
+                            button
+                                .custom_id(identifiers::ONBOARDING_ARCHIVE)
+                                .style(ButtonStyle::Primary)
+                                .disabled(true)
+                                .label("Archive")
+                        })
+                        .create_button(|button| {
+                            button
+                                .custom_id(identifiers::ONBOARDING_DELETE)
+                                .style(ButtonStyle::Danger)
+                                .label("Delete")
+                        })
+                })
+            })
         }).await?;
     }
 
@@ -202,7 +219,7 @@ async fn onboarding_member_removal(ctx: &serenity::client::Context, bot: &Bot, g
                             .create_button(|button| {
                                 button
                                     .custom_id(identifiers::ONBOARDING_ARCHIVE)
-                                    .style(ButtonStyle::Secondary)
+                                    .style(ButtonStyle::Primary)
                                     .label("Archive")
                             })
                             .create_button(|button| {
