@@ -94,7 +94,7 @@ async fn main() {
         redis::cmd("AUTH").arg(&auth_info).execute(&mut database);
     }
 
-    let database = Mutex::new(client.get_connection().expect("connecting to redis failed"));
+    let database = Mutex::new(database);
 
     // Create bot instance to be passed as context to command functions
     let bot = Bot { database, run_mode };
