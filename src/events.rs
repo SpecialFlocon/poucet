@@ -181,16 +181,18 @@ async fn onboarding_delete(ctx: &serenity::client::Context, bot: &Bot, interacti
     let validation_channel_to_user_key = "validation_channel_to_user";
     let mut database = bot.database.lock().await;
 
-    let user_id: u64 = database.hget(validation_channel_to_user_key, interaction.channel_id.as_u64())?;
-    let user_id = UserId(user_id);
-    let validation_key = format!("validation:{}:{}", interaction.guild_id.unwrap(), user_id);
-    let validation_channel = pending_validation(&mut database, &guild_id, &user_id).await?;
+    if database.hexists(validation_channel_to_user_key, interaction.channel_id.as_u64())? {
+        let user_id: u64 = database.hget(validation_channel_to_user_key, interaction.channel_id.as_u64())?;
+        let user_id = UserId(user_id);
+        let validation_key = format!("validation:{}:{}", interaction.guild_id.unwrap(), user_id);
+        let validation_channel = pending_validation(&mut database, &guild_id, &user_id).await?;
 
-    if let Some(validation_channel) = validation_channel {
-        // Detach validation instance from the database so that the bot stops managing it
-        database.hdel(&validation_key, "channel")?;
-        database.hdel(&validation_user_to_channel_key, user_id.as_u64())?;
-        database.hdel(&validation_channel_to_user_key, validation_channel.as_u64())?;
+        if let Some(validation_channel) = validation_channel {
+            // Detach validation instance from the database so that the bot stops managing it
+            database.hdel(&validation_key, "channel")?;
+            database.hdel(&validation_user_to_channel_key, user_id.as_u64())?;
+            database.hdel(&validation_channel_to_user_key, validation_channel.as_u64())?;
+        }
     }
 
     interaction.channel_id.delete(&ctx.http).await?;
