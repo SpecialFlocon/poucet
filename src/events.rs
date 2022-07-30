@@ -3,6 +3,7 @@ use serenity::builder::{CreateMessage, CreateInteractionResponseFollowup};
 use serenity::http::StatusCode;
 use serenity::model::application::component::ButtonStyle;
 use serenity::model::application::interaction::{Interaction, InteractionResponseType};
+use serenity::model::application::interaction::message_component::MessageComponentInteraction;
 use serenity::model::channel::{ChannelType, PermissionOverwrite, PermissionOverwriteType};
 use serenity::model::gateway::Ready;
 use serenity::model::guild::{Guild, Member, Role};
@@ -16,6 +17,8 @@ use tracing::{debug, error, info};
 
 use crate::{Bot, Error};
 
+const ONBOARDING_ARCHIVE: &str = "onboarding_archive";
+const ONBOARDING_DELETE: &str = "onboarding_delete";
 const ONBOARDING_START: &str = "onboarding_start";
 
 // Event dispatcher
@@ -87,25 +90,7 @@ async fn guild_create(ctx: &serenity::client::Context, bot: &Bot, guild: &Guild,
 }
 
 async fn guild_member_removal(ctx: &serenity::client::Context, bot: &Bot, guild_id: &GuildId, user: &User) -> Result<(), Error> {
-    debug!("Member {} left the server, removing database entries related to this member and informing staff", &user.id);
-
-    let mut database = bot.database.lock().await;
-    let pending_validations_key = format!("pending_validations:{}", guild_id);
-    let validation_channel = pending_validation(&mut database, guild_id, &user.id).await?;
-
-    if let Some(validation_channel) = validation_channel {
-        database.hdel(&pending_validations_key, &user.id.as_u64())?;
-
-        validation_channel.send_message(&ctx.http, |message| {
-            message
-                .embed(|embed| {
-                    embed
-                        .colour(Colour::DARK_RED)
-                        .title("Status update")
-                        .description(format!("User {} has left the server", user))
-                })
-        }).await?;
-    }
+    onboarding_member_removal(ctx, bot, guild_id, user).await?;
 
     Ok(())
 }
@@ -119,27 +104,144 @@ async fn interaction_create(ctx: &serenity::client::Context, bot: &Bot, interact
             return Ok(());
         }
 
-        if interaction.data.custom_id == ONBOARDING_START {
-            let mut database = bot.database.lock().await;
-
-            interaction.create_interaction_response(&ctx.http, |response| {
-                response
-                    .kind(InteractionResponseType::DeferredChannelMessageWithSource)
-                    .interaction_response_data(|data| data.ephemeral(true))
-            }).await?;
-
-            let member = interaction.member.as_ref().unwrap();
-            let validation_channel = pending_validation(&mut database, &guild_id, &member.user.id).await?;
-
-            if validation_channel.is_none() {
-                setup_member_verification(ctx, &mut database, member).await?;
-            }
-
-            interaction.create_followup_message(&ctx.http, |message| {
-                reply_to_join_request(validation_channel, message)
-            }).await?;
+        match interaction.data.custom_id.as_str() {
+            ONBOARDING_ARCHIVE => onboarding_archive(ctx, bot, interaction).await?,
+            ONBOARDING_DELETE => onboarding_delete(ctx, bot, interaction).await?,
+            ONBOARDING_START => onboarding_start(ctx, bot, interaction).await?,
+            _ => (),
         }
     }
+
+    Ok(())
+}
+
+// Onboarding actions
+async fn onboarding_archive(ctx: &serenity::client::Context, bot: &Bot, interaction: &MessageComponentInteraction) -> Result<(), Error> {
+    interaction.create_interaction_response(&ctx.http, |response| {
+        response
+            .kind(InteractionResponseType::DeferredChannelMessageWithSource)
+            .interaction_response_data(|data| data)
+    }).await?;
+
+    let guild_id = interaction.guild_id.unwrap();
+    let validation_user_to_channel_key = "validation_user_to_channel";
+    let validation_channel_to_user_key = "validation_channel_to_user";
+    let mut database = bot.database.lock().await;
+
+    let user_id: u64 = database.hget(validation_channel_to_user_key, interaction.channel_id.as_u64())?;
+    let user_id = UserId(user_id);
+    let validation_key = format!("validation:{}:{}", guild_id, user_id);
+    let validation_channel = pending_validation(&mut database, &guild_id, &user_id).await?;
+
+    if let Some(validation_channel) = validation_channel {
+        // Detach validation instance from the database so that the bot stops managing it
+        database.hdel(&validation_key, "channel")?;
+        database.hdel(&validation_user_to_channel_key, user_id.as_u64())?;
+        database.hdel(&validation_channel_to_user_key, validation_channel.as_u64())?;
+
+        let mut guild_channels = guild_id.channels(&ctx.http).await?;
+        let validation_guild_channel = guild_channels.get_mut(&validation_channel).ok_or_else(|| {
+            Error::from(format!("channel {} is set as the validation channel for user {}, but it was not found in the server.", validation_channel, user_id))
+        })?;
+
+        // Rename channel to indicate it is archived
+        let channel_name = format!("📦-{}", validation_guild_channel.name);
+
+        validation_guild_channel.edit(&ctx, |channel| {
+            channel.name(&channel_name)
+        }).await?;
+
+        info!("archived validation channel {} in guild {}", validation_channel, guild_id);
+
+        interaction.create_followup_message(&ctx.http, |message| {
+            message.content("Channel has been archived.")
+        }).await?;
+    }
+
+    Ok(())
+}
+
+async fn onboarding_delete(ctx: &serenity::client::Context, bot: &Bot, interaction: &MessageComponentInteraction) -> Result<(), Error> {
+    let guild_id = interaction.guild_id.unwrap();
+    let validation_user_to_channel_key = "validation_user_to_channel";
+    let validation_channel_to_user_key = "validation_channel_to_user";
+    let mut database = bot.database.lock().await;
+
+    let user_id: u64 = database.hget(validation_channel_to_user_key, interaction.channel_id.as_u64())?;
+    let user_id = UserId(user_id);
+    let validation_key = format!("validation:{}:{}", interaction.guild_id.unwrap(), user_id);
+    let validation_channel = pending_validation(&mut database, &guild_id, &user_id).await?;
+
+    if let Some(validation_channel) = validation_channel {
+        // Detach validation instance from the database so that the bot stops managing it
+        database.hdel(&validation_key, "channel")?;
+        database.hdel(&validation_user_to_channel_key, user_id.as_u64())?;
+        database.hdel(&validation_channel_to_user_key, validation_channel.as_u64())?;
+    }
+
+    interaction.channel_id.delete(&ctx.http).await?;
+
+    Ok(())
+}
+
+async fn onboarding_member_removal(ctx: &serenity::client::Context, bot: &Bot, guild_id: &GuildId, user: &User) -> Result<(), Error> {
+    debug!("Member {} left the server, prompting staff to decide what to do with the validation channel", &user.id);
+
+    let mut database = bot.database.lock().await;
+    let validation_channel = pending_validation(&mut database, guild_id, &user.id).await?;
+
+    if let Some(validation_channel) = validation_channel {
+        validation_channel.send_message(&ctx.http, |message| {
+            message
+                .embed(|embed| {
+                    embed
+                        .colour(Colour::DARK_RED)
+                        .title("Member left")
+                        .description(format!("{} ({}#{}) has left the server", user, user.name, user.discriminator))
+                })
+                .components(|components| {
+                    components.create_action_row(|row| {
+                        row
+                            .create_button(|button| {
+                                button
+                                    .custom_id(ONBOARDING_ARCHIVE)
+                                    .style(ButtonStyle::Secondary)
+                                    .label("Archive")
+                            })
+                            .create_button(|button| {
+                                button
+                                    .custom_id(ONBOARDING_DELETE)
+                                    .style(ButtonStyle::Danger)
+                                    .label("Delete")
+                            })
+                    })
+                })
+        }).await?;
+    }
+
+    Ok(())
+}
+
+async fn onboarding_start(ctx: &serenity::client::Context, bot: &Bot, interaction: &MessageComponentInteraction) -> Result<(), Error> {
+    interaction.create_interaction_response(&ctx.http, |response| {
+        response
+            .kind(InteractionResponseType::DeferredChannelMessageWithSource)
+            .interaction_response_data(|data| data.ephemeral(true))
+    }).await?;
+
+    let guild_id = interaction.guild_id.unwrap();
+    let mut database = bot.database.lock().await;
+
+    let member = interaction.member.as_ref().unwrap();
+    let validation_channel = pending_validation(&mut database, &guild_id, &member.user.id).await?;
+
+    if validation_channel.is_none() {
+        setup_member_verification(ctx, &mut database, member).await?;
+    }
+
+    interaction.create_followup_message(&ctx.http, |message| {
+        reply_to_join_request(validation_channel, message)
+    }).await?;
 
     Ok(())
 }
@@ -147,20 +249,22 @@ async fn interaction_create(ctx: &serenity::client::Context, bot: &Bot, interact
 // Utility functions
 async fn pending_validation<'a>(database: &mut MutexGuard<'a, Connection>, guild_id: &GuildId, user_id: &UserId) -> Result<Option<ChannelId>, Error> {
     let user_id = user_id.as_u64();
-    let pending_validations_key = format!("pending_validations:{}", guild_id);
+    let validation_key = format!("validation:{}:{}", guild_id, user_id);
 
-    if !database.hexists(&pending_validations_key, user_id)? {
+    if !database.hexists(&validation_key, "channel")? {
         return Ok(None);
     }
 
-    Ok(Some(ChannelId(database.hget(&pending_validations_key, user_id)?)))
+    Ok(Some(ChannelId(database.hget(&validation_key, "channel")?)))
 }
 
 async fn setup_member_verification<'a>(ctx: &serenity::client::Context, database: &mut MutexGuard<'a, Connection>, member: &Member) -> Result<(), Error> {
     let guild_id = member.guild_id;
     let guild_key = format!("guild:{}", guild_id);
     let onboarding_key = format!("onboarding:{}", guild_id);
-    let pending_validations_key = format!("pending_validations:{}", guild_id);
+    let validation_key = format!("validation:{}:{}", guild_id, member.user.id.as_u64());
+    let validation_user_to_channel_key = "validation_user_to_channel";
+    let validation_channel_to_user_key = "validation_channel_to_user";
     let roles = guild_id.roles(&ctx.http).await?;
     let notify_role = database.hget(&onboarding_key, "notify_role")?;
     let notify_role = roles.get(&RoleId(notify_role)).ok_or_else(|| {
@@ -181,8 +285,9 @@ async fn setup_member_verification<'a>(ctx: &serenity::client::Context, database
             }])
     }).await?;
 
-    // Map validation channel to the member in the database.
-    database.hset(&pending_validations_key, member.user.id.as_u64(), member_channel.id.as_u64())?;
+    database.hset(&validation_key, "channel", member_channel.id.as_u64())?;
+    database.hset(validation_channel_to_user_key, member_channel.id.as_u64(), member.user.id.as_u64())?;
+    database.hset(validation_user_to_channel_key, member.user.id.as_u64(), member_channel.id.as_u64())?;
 
     member_channel.send_message(&ctx.http, |message| new_member_wait_notice(member, notify_role, message)).await?;
 
