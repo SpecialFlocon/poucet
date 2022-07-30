@@ -80,10 +80,6 @@ async fn main() {
 
     let auth_info = if redis_username.is_empty() && redis_password.is_empty() {
         String::new()
-    } else if redis_username.is_empty() {
-        redis_password
-    } else if redis_password.is_empty() {
-        redis_username
     } else {
         format!("{}:{}", redis_username, redis_password)
     };
