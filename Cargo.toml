@@ -6,19 +6,19 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-config = "0.13.1"
+config = "0.13.3"
 derivative = "2.2.0"
-poise = "0.2.2"
-redis = "0.21.5"
-serde = "1.0.140"
-tracing = "0.1.35"
-tracing-subscriber = "0.3.15"
+poise = "0.5.2"
+redis = "0.22.3"
+serde = "1.0.152"
+tracing = "0.1.37"
+tracing-subscriber = "0.3.16"
 
 [dependencies.serenity]
-version = "0.11.4"
+version = "0.11.5"
 default-features = false
 features = ["client", "gateway", "model", "rustls_backend"]
 
 [dependencies.tokio]
-version = "1.20.0"
+version = "1.25.0"
 features = ["full"]

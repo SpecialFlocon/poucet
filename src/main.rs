@@ -38,10 +38,10 @@ impl Bot {
 
 async fn error_handler(error: FrameworkError<'_, Bot, Error>) {
     match error {
-        FrameworkError::Setup { error } => error!("error setting up bot framework: {:?}", error),
-        FrameworkError::Listener { error, ctx: _, event, framework: _ } => error!("error while handling event {}: {:?}", event.name(), error),
-        FrameworkError::Command { error, ctx} => error!("error while running command {}: {:?}", ctx.command().name, error),
-        FrameworkError::ArgumentParse { error, input, ctx} => {
+        FrameworkError::Setup { error, .. } => error!("error setting up bot framework: {:?}", error),
+        FrameworkError::EventHandler { error, ctx: _, event, framework: _ } => error!("error while handling event {}: {:?}", event.name(), error),
+        FrameworkError::Command { error, ctx } => error!("error while running command {}: {:?}", ctx.command().name, error),
+        FrameworkError::ArgumentParse { error, input, ctx } => {
             let incorrect_input = input.unwrap_or_default();
 
             error!("error while parsing argument: {:?}, incorrect input: {}", error, incorrect_input);
@@ -102,14 +102,14 @@ async fn main() {
     // Connect to Discord and run bot framework
     let bot_token = configuration.get_string("discord.bot.token").expect("missing or incorrect discord bot token");
     let intents = GatewayIntents::GUILDS | GatewayIntents::GUILD_MEMBERS;
-    let framework = Framework::build()
+    let framework = Framework::builder()
         .options(FrameworkOptions {
             commands: vec![
                 commands::ping(),
                 commands::setup(),
                 commands::onboarding(),
             ],
-            listener: |ctx, event, framework, user_data| {
+            event_handler: |ctx, event, framework, user_data| {
                 Box::pin(events::listener(ctx, event, framework, user_data))
             },
             on_error: |error| Box::pin(error_handler(error)),
@@ -117,7 +117,7 @@ async fn main() {
         })
         .token(&bot_token)
         .intents(intents)
-        .user_data_setup(move |ctx, ready, framework| Box::pin(async move {
+        .setup(move |ctx, ready, framework| Box::pin(async move {
             let mut created_commands: serenity::Result<Vec<Command>>;
 
             // Register slash commands as guild commands if running in dev mode,

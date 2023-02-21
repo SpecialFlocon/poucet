@@ -44,7 +44,7 @@ async fn configure(
     let admin_role = RoleId(admin_role);
 
     if ctx.author().id != ctx.guild().unwrap().owner_id &&
-        !ctx.author().has_role(&ctx.discord(), guild_id, admin_role).await? {
+        !ctx.author().has_role(&ctx, guild_id, admin_role).await? {
         poise::send_reply(ctx, |reply| {
             reply
                 .content("This is an admin command, you do not have the required rights to run it!")
@@ -88,7 +88,7 @@ async fn approve(ctx: Context<'_>) -> Result<(), Error> {
     let admin_role = RoleId(admin_role);
 
     if ctx.author().id != guild.owner_id &&
-        !ctx.author().has_role(&ctx.discord(), guild_id, admin_role).await? {
+        !ctx.author().has_role(&ctx, guild_id, admin_role).await? {
             poise::send_reply(ctx, |reply| {
                 reply
                     .content("This is an admin command, you do not have the required rights to run it!")
@@ -115,13 +115,13 @@ async fn approve(ctx: Context<'_>) -> Result<(), Error> {
     let user_id = UserId(user_id);
 
     // Remove approved member's access to the validation channel
-    channel_id.delete_permission(&ctx.discord(), PermissionOverwriteType::Member(user_id)).await?;
+    channel_id.delete_permission(&ctx, PermissionOverwriteType::Member(user_id)).await?;
 
-    let mut member = guild_id.member(&ctx.discord(), user_id).await?;
+    let mut member = guild_id.member(&ctx, user_id).await?;
     let validated_role = database.hget(&guild_key, "validated_role")?;
     let validated_role = RoleId(validated_role);
 
-    member.add_role(ctx.discord(), validated_role).await?;
+    member.add_role(ctx, validated_role).await?;
 
     poise::send_reply(ctx, |reply| {
         reply
@@ -151,7 +151,7 @@ async fn approve(ctx: Context<'_>) -> Result<(), Error> {
         let role_assignment_channel = database.hget(&guild_key, "role_assignment_channel")?;
         let role_assignment_channel = ChannelId(role_assignment_channel);
 
-        system_channel.send_message(&ctx.discord(), |message| {
+        system_channel.send_message(&ctx, |message| {
             message.content(format!(
                 "👋 Welcome {} to Transpouce! Feel free to grab some roles in {}, and to write a few words about yourself in {} if you like. Have a pleasant stay here! 🤗",
                 member.mention(),
@@ -188,7 +188,7 @@ async fn deny(ctx: Context<'_>) -> Result<(), Error> {
     let admin_role = RoleId(admin_role);
 
     if ctx.author().id != ctx.guild().unwrap().owner_id &&
-        !ctx.author().has_role(&ctx.discord(), guild_id, admin_role).await? {
+        !ctx.author().has_role(&ctx, guild_id, admin_role).await? {
         poise::send_reply(ctx, |reply| {
             reply
                 .content("This is an admin command, you do not have the required rights to run it!")
@@ -213,9 +213,9 @@ async fn deny(ctx: Context<'_>) -> Result<(), Error> {
 
     let user_id: u64 = database.hget(validation_channel_to_user_key, channel_id.as_u64())?;
     let user_id = UserId(user_id);
-    let member = guild_id.member(&ctx.discord(), user_id).await?;
+    let member = guild_id.member(&ctx, user_id).await?;
 
-    member.kick_with_reason(&ctx.discord(), "Denied at validation").await?;
+    member.kick_with_reason(&ctx, "Denied at validation").await?;
 
     poise::send_reply(ctx, |reply| {
         reply.content(format!("Denied {} ({}#{})", member.user, member.user.name, member.user.discriminator))
